@@ -1,0 +1,24 @@
+# IDE files
+.metadata/
+.vscode/
+
+# Build files
+**/Debug/
+**/Release/
+**/build/
+
+# Generated files
+**/ra_gen/
+**/*.o
+**/*.d
+**/*.elf
+**/*.map
+**/*.rpd
+**/*.sbd
+**/*.srec
+
+# Log files
+**/*.log
+
+# Other
+Renesas.RA_DFP/
