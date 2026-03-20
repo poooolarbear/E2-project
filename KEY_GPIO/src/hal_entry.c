@@ -22,7 +22,7 @@ void hal_entry(void)
     
     while(1)
     {
-        // 点亮LED (P04_00)
+        // 点亮LED (P04_00qq)
         R_IOPORT_PinWrite(&g_ioport_ctrl, BSP_IO_PORT_04_PIN_00, BSP_IO_LEVEL_HIGH);
         
         // 延时约500ms
