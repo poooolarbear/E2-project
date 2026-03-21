@@ -97,7 +97,7 @@ extern "C" {
             (((RA_NOT_DEFINED > 0) ? 0U : 1U) << 0) /* CAC */ | \
             (((RA_NOT_DEFINED > 0) ? 0U : 1U) << 1) /* CRC */ | \
             (((RA_NOT_DEFINED > 0) ? 0U : 1U) << 3) /* CTSU */ | \
-            (((RA_NOT_DEFINED > 0) ? 0U : 1U) << 8) /* SSIE0 */ | \
+            (((1 > 0) ? 0U : 1U) << 8) /* SSIE0 */ | \
             (((RA_NOT_DEFINED > 0) ? 0U : 1U) << 12) /* SDHI0 */ | \
             (((RA_NOT_DEFINED > 0) ? 0U : 1U) << 13) /* DOC */ | \
             (((RA_NOT_DEFINED > 0) ? 0U : 1U) << 31) /* SCE9 */ | \
@@ -141,7 +141,7 @@ extern "C" {
 #ifndef BSP_TZ_CFG_MSSAR
 #define BSP_TZ_CFG_MSSAR (\
             (((RA_NOT_DEFINED > 0) ? 0U : 1U) << 0) /* ELC */ | \
-            (((RA_NOT_DEFINED > 0) ? 0U : 1U) << 1) /* DTC_DMAC */ | \
+            (((1 > 0) ? 0U : 1U) << 1) /* DTC_DMAC */ | \
             0xfffffffc) /* Unused */
 #endif
 
@@ -247,10 +247,10 @@ extern "C" {
 #endif
 
 /* Set DTCSTSAR if the Secure program uses the DTC. */
-#if RA_NOT_DEFINED == RA_NOT_DEFINED
-#define BSP_TZ_CFG_DTC_USED (0U)
+#if 1 == RA_NOT_DEFINED
+ #define BSP_TZ_CFG_DTC_USED (0U)
 #else
- #define BSP_TZ_CFG_DTC_USED (1U)
+#define BSP_TZ_CFG_DTC_USED (1U)
 #endif
 
 /* Security attribution of FLWT and FCKMHZ registers. */

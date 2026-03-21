@@ -70,6 +70,9 @@
       <configSetting altId="debug0.swdio.p108" configurationId="debug0.swdio" isUsedByDriver="true"/>
       <configSetting altId="sci7.rxd.p614" configurationId="sci7.rxd" isUsedByDriver="true"/>
       <configSetting altId="sci7.txd.p613" configurationId="sci7.txd" isUsedByDriver="true"/>
+      <configSetting altId="ssi0.ssirxd.p114" configurationId="ssi0.ssirxd" isUsedByDriver="true"/>
+      <configSetting altId="ssi0.ssisck.p204" configurationId="ssi0.ssisck" isUsedByDriver="true"/>
+      <configSetting altId="ssi0.ssiws.p205" configurationId="ssi0.ssiws" isUsedByDriver="true"/>
     </pincfg>
   </raPinConfiguration>
 </raConfiguration>
