@@ -2,13 +2,15 @@
 
 static volatile int g_uart7_tx_complete = 0;
 static volatile int g_uart7_rx_complete = 0;
+static volatile int g_uart2_tx_complete = 0;
+static volatile int g_uart2_rx_complete = 0;
 
 
 /***********************************************************************************************************************
- * Functions
+ * UART7 Functions
  **********************************************************************************************************************/
 
-fsp_err_t drv_uart_init(void)
+fsp_err_t drv_uart7_init(void)
 {
     fsp_err_t err;
 
@@ -19,7 +21,7 @@ fsp_err_t drv_uart_init(void)
     return err;
 }
 
-fsp_err_t drv_uart_test(uint8_t *p_msg)
+fsp_err_t drv_uart7_test(uint8_t *p_msg)
 {
     fsp_err_t err;
     uint8_t msg_len = 0;
@@ -31,23 +33,22 @@ fsp_err_t drv_uart_test(uint8_t *p_msg)
     /* 启动发送 */
     err = g_uart7.p_api->write(g_uart7.p_ctrl, p_msg, msg_len);
     /* 等待发送完毕 */
-    drv_uart_wait_for_tx();
+    drv_uart7_wait_for_tx();
 
     return err;
 }
 
-void drv_uart_wait_for_tx(void)
+void drv_uart7_wait_for_tx(void)
 {
     while (!g_uart7_tx_complete); // 阻塞等待
     g_uart7_tx_complete = 0;
 }
 
-void drv_uart_wait_for_rx(void)
+void drv_uart7_wait_for_rx(void)
 {
     while (!g_uart7_rx_complete); // 阻塞等待
     g_uart7_rx_complete = 0;
 }
-
 
 void uart7_callback(uart_callback_args_t * p_args)
 {
@@ -70,9 +71,74 @@ void uart7_callback(uart_callback_args_t * p_args)
     }
 }
 
+/***********************************************************************************************************************
+ * UART2 Functions
+ **********************************************************************************************************************/
+
+fsp_err_t drv_uart2_init(void)
+{
+    fsp_err_t err;
+
+    /* 打开串口 */
+    err = g_uart2.p_api->open(g_uart2.p_ctrl, g_uart2.p_cfg);
+    if(FSP_SUCCESS != err) __BKPT();
+
+    return err;
+}
+
+fsp_err_t drv_uart2_test(uint8_t *p_msg)
+{
+    fsp_err_t err;
+    uint8_t msg_len = 0;
+    char *p_temp_ptr = (char *)p_msg;
+
+    /* 计算长度 */
+    msg_len = ((uint8_t)(strlen((char *)p_temp_ptr)));
+
+    /* 启动发送 */
+    err = g_uart2.p_api->write(g_uart2.p_ctrl, p_msg, msg_len);
+    /* 等待发送完毕 */
+    drv_uart2_wait_for_tx();
+
+    return err;
+}
+
+void drv_uart2_wait_for_tx(void)
+{
+    while (!g_uart2_tx_complete); // 阻塞等待
+    g_uart2_tx_complete = 0;
+}
+
+void drv_uart2_wait_for_rx(void)
+{
+    while (!g_uart2_rx_complete); // 阻塞等待
+    g_uart2_rx_complete = 0;
+}
+
+void uart2_callback(uart_callback_args_t * p_args)
+{
+    switch (p_args->event)
+    {
+        case UART_EVENT_TX_COMPLETE:
+        {
+            g_uart2_tx_complete  = 1;
+            break;
+        }
+        case UART_EVENT_RX_COMPLETE:
+        {
+            g_uart2_rx_complete = 1;
+            break;
+        }
+        default:
+        {
+            break;
+        }
+    }
+}
 
 
-/*printf输出重定向到串口*/
+
+/*printf输出重定向到串口 (默认使用UART7)*/
 int __io_putchar(int ch)
 {
     fsp_err_t err = FSP_SUCCESS;
@@ -80,7 +146,7 @@ int __io_putchar(int ch)
     err = g_uart7.p_api->write(g_uart7.p_ctrl, (uint8_t*)&ch, 1);
 
     if(FSP_SUCCESS != err) __BKPT();
-    drv_uart_wait_for_tx();
+    drv_uart7_wait_for_tx();
 
     return ch;
 }

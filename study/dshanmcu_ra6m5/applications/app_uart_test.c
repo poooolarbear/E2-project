@@ -2,7 +2,7 @@
  * Includes
  **********************************************************************************************************************/
 #include "app.h"
-#include "drv_uart.h"
+
 
 /**********************************************************************************************************************
  * Macro definitions
@@ -31,7 +31,7 @@ void app_uart_test(void)
     fsp_err_t err;
     uint8_t *p_msg = (uint8_t *)"Hello, DShanMCU-RA6M5!\r\n";
 
-    err = drv_uart_init();
+    err = drv_uart2_init();
     if(FSP_SUCCESS != err) __BKPT();
 
     while (1)
@@ -51,12 +51,23 @@ static fsp_err_t uart_write_msg(uint8_t *p_msg)
     msg_len = ((uint8_t)(strlen((char *)p_temp_ptr)));
 
     /* 启动发送 */
-    err = g_uart7.p_api->write(g_uart7.p_ctrl, p_msg, msg_len);
+    err = g_uart2.p_api->write(g_uart2.p_ctrl, p_msg, msg_len);
     /* 等待发送完毕 */
-    drv_uart_wait_for_tx();
+    drv_uart2_wait_for_tx();
 
     /*printf打印输出*/
     printf("[printf] %s", p_msg);
 
     return err;
 }
+
+fsp_err_t trackpin_write(uint8_t *p_msg)
+{
+    fsp_err_t err;
+    uint8_t *a_msg;
+    a_msg = "t0.txt = " + p_msg;
+    err = uart_write_msg(a_msg);
+    return err;
+}
+
+

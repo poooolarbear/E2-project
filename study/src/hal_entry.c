@@ -12,7 +12,9 @@ FSP_CPP_FOOTER
 void hal_entry(void)
 {
     /* TODO: add your own code here */
+    uint8_t msg[] = "Hello, DShanMCU-RA6M5!\r\n";
     app_uart_test();
+    drv_uart2_test(msg);
 #if BSP_TZ_SECURE_BUILD
     /* Enter non-secure code */
     R_BSP_NonSecureEnter();

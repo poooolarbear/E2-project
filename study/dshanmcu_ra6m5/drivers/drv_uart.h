@@ -23,15 +23,19 @@
 /***********************************************************************************************************************
  * Exported global functions (to be accessed by other files)
  **********************************************************************************************************************/
-fsp_err_t drv_uart_init(void);
-
-fsp_err_t drv_uart_test(uint8_t *p_msg);
-
-void drv_uart_wait_for_tx(void);
-
-void drv_uart_wait_for_rx(void);
-
+/* UART7 functions */
+fsp_err_t drv_uart7_init(void);
+fsp_err_t drv_uart7_test(uint8_t *p_msg);
+void drv_uart7_wait_for_tx(void);
+void drv_uart7_wait_for_rx(void);
 void uart7_callback(uart_callback_args_t * p_args);
+
+/* UART2 functions */
+fsp_err_t drv_uart2_init(void);
+fsp_err_t drv_uart2_test(uint8_t *p_msg);
+void drv_uart2_wait_for_tx(void);
+void drv_uart2_wait_for_rx(void);
+void uart2_callback(uart_callback_args_t * p_args);
 
 /*printf输出重定向到串口*/
 int __io_putchar(int ch);
