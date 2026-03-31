@@ -55,18 +55,6 @@ static fsp_err_t uart_write_msg(uint8_t *p_msg)
     /* 等待发送完毕 */
     drv_uart2_wait_for_tx();
 
-    /*printf打印输出*/
-    printf("[printf] %s", p_msg);
-
-    return err;
-}
-
-fsp_err_t trackpin_write(uint8_t *p_msg)
-{
-    fsp_err_t err;
-    uint8_t *a_msg;
-    a_msg = "t0.txt = " + p_msg;
-    err = uart_write_msg(a_msg);
     return err;
 }
 

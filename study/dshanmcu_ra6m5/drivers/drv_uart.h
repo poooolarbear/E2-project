@@ -41,6 +41,36 @@ void uart2_callback(uart_callback_args_t * p_args);
 int __io_putchar(int ch);
 int _write(int fd, char *pBuffer, int size);
 
+/* 串口2输出函数 */
+int uart2_putchar(int ch);
+int uart2_printf(const char *p_str);
+
+/**********************************************************************************************************************
+ * 环形队列定义
+ **********************************************************************************************************************/
+#define RING_BUFFER_SIZE 256
+
+typedef struct {
+    uint8_t buffer[RING_BUFFER_SIZE];
+    uint16_t head;
+    uint16_t tail;
+    uint16_t count;
+} ring_buffer_t;
+
+/***********************************************************************************************************************
+ * 环形队列函数
+ **********************************************************************************************************************/
+void ring_buffer_init(ring_buffer_t *rb);
+int ring_buffer_put(ring_buffer_t *rb, uint8_t data);
+int ring_buffer_get(ring_buffer_t *rb, uint8_t *data);
+uint16_t ring_buffer_count(ring_buffer_t *rb);
+void ring_buffer_clear(ring_buffer_t *rb);
+
+/***********************************************************************************************************************
+ * 串口2数据处理函数
+ **********************************************************************************************************************/
+void uart2_process_data(void);
+
 
 
 #endif /*DRV_UART_H*/
