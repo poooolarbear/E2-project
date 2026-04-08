@@ -1,5 +1,7 @@
 #include "hal_data.h"
 #include "app.h"
+#include "app_ai_config.h"
+#include "net_client.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -9,7 +11,12 @@ FSP_CPP_FOOTER
 
 #define AUDIO_FRAME_SAMPLES             (320U)
 #define AUDIO_STATUS_UPDATE_INTERVAL    (10U)
-#define AUDIO_LEVEL_TRIGGER             (300U)
+#define AUDIO_WAKE_LEVEL_TRIGGER        (380U)
+#define AUDIO_WAKE_CONSECUTIVE_FRAMES   (3U)
+#define AUDIO_RECORD_TARGET_FRAMES      (40U)
+#define AUDIO_RESULT_HOLD_FRAMES        (80U)
+#define AUDIO_COOLDOWN_FRAMES           (60U)
+#define WIFI_API_TEST_ENABLE            (1)
 
 #define DISPLAY_STATUS_CTRL             "g0"
 #define DISPLAY_LEVEL_CTRL              "g1"
@@ -19,7 +26,12 @@ typedef enum e_audio_runtime_state
 {
     AUDIO_RUNTIME_BOOT = 0,
     AUDIO_RUNTIME_LISTENING,
-    AUDIO_RUNTIME_ACTIVITY
+    AUDIO_RUNTIME_WAKEUP,
+    AUDIO_RUNTIME_RECORDING,
+    AUDIO_RUNTIME_ASR,
+    AUDIO_RUNTIME_TRANSLATE,
+    AUDIO_RUNTIME_SHOW_RESULT,
+    AUDIO_RUNTIME_ERROR
 } audio_runtime_state_t;
 
 static int16_t g_audio_rx_buffer[AUDIO_FRAME_SAMPLES];
@@ -28,10 +40,23 @@ static volatile bool g_audio_frame_ready = false;
 static volatile uint32_t g_audio_rx_events = 0;
 static volatile uint32_t g_audio_error_events = 0;
 static audio_runtime_state_t g_audio_state = AUDIO_RUNTIME_BOOT;
+static bool g_cloud_connected = false;
+static uint32_t g_wake_streak = 0;
+static uint32_t g_record_frame_count = 0;
+static uint32_t g_record_level_sum = 0;
+static uint32_t g_result_hold_count = 0;
+static uint32_t g_cooldown_count = 0;
+static char g_source_text[96];
+static char g_translated_text[128];
 
+static void audio_copy_display_text(char *dest, uint32_t dest_size, const char *text);
 static void audio_display_text(const char *control, const char *text);
-static void audio_display_value(const char *control, uint32_t value);
 static void audio_display_state(audio_runtime_state_t state);
+static void audio_show_translation_lines(void);
+static void wifi_api_test_run(void);
+static void audio_state_set(audio_runtime_state_t state);
+static void audio_reset_capture_session(void);
+static fsp_err_t audio_cloud_prepare(void);
 static fsp_err_t audio_frontend_init(void);
 static fsp_err_t audio_frontend_start_frame(void);
 static uint32_t audio_calculate_level(const int16_t *buffer, uint32_t samples);
@@ -75,6 +100,14 @@ void hal_entry(void)
         __BKPT();
     }
 
+#if WIFI_API_TEST_ENABLE
+    wifi_api_test_run();
+    while (1)
+    {
+        R_BSP_SoftwareDelay(500, BSP_DELAY_UNITS_MILLISECONDS);
+    }
+#endif
+
     audio_display_text(DISPLAY_HINT_CTRL, "Audio frontend init");
 
     err = audio_frontend_init();
@@ -84,8 +117,9 @@ void hal_entry(void)
         __BKPT();
     }
 
-    audio_display_text(DISPLAY_HINT_CTRL, "Mic stream active");
-    audio_display_state(AUDIO_RUNTIME_LISTENING);
+    audio_display_text(DISPLAY_LEVEL_CTRL, "SRC: -");
+    audio_display_text(DISPLAY_HINT_CTRL, "DST: -");
+    audio_state_set(AUDIO_RUNTIME_LISTENING);
 
     while (1)
     {
@@ -112,32 +146,86 @@ void hal_entry(void)
 #endif
 }
 
+static void wifi_api_test_run(void)
+{
+    fsp_err_t err;
+    char status_line[40];
+
+    printf("\n========== WIFI API TEST START ==========\n");
+    printf("SSID: %s\n", APP_AI_WIFI_SSID);
+
+    audio_display_text(DISPLAY_STATUS_CTRL, "WIFI TEST");
+    audio_display_text(DISPLAY_LEVEL_CTRL, "Connecting...");
+    audio_display_text(DISPLAY_HINT_CTRL, APP_AI_WIFI_SSID);
+
+    err = net_client_init();
+    if (FSP_SUCCESS == err)
+    {
+        err = net_client_connect_wifi(APP_AI_WIFI_SSID, APP_AI_WIFI_PASSWORD);
+    }
+    if (FSP_SUCCESS == err)
+    {
+        printf("WIFI API connect success.\n");
+        audio_display_text(DISPLAY_STATUS_CTRL, "WIFI OK");
+        audio_display_text(DISPLAY_LEVEL_CTRL, "Connected");
+        audio_display_text(DISPLAY_HINT_CTRL, APP_AI_WIFI_SSID);
+    }
+    else
+    {
+        printf("WIFI API connect failed, err=%d\n", err);
+        snprintf(status_line, sizeof(status_line), "ERR:%d", err);
+        audio_display_text(DISPLAY_STATUS_CTRL, "WIFI FAIL");
+        audio_display_text(DISPLAY_LEVEL_CTRL, status_line);
+        audio_display_text(DISPLAY_HINT_CTRL, "Check ssid/pwd");
+    }
+
+    printf("=========== WIFI API TEST END ===========\n");
+}
+
+static void audio_copy_display_text(char *dest, uint32_t dest_size, const char *text)
+{
+    uint32_t out_index = 0U;
+
+    if ((NULL == dest) || (0U == dest_size))
+    {
+        return;
+    }
+
+    dest[0] = '\0';
+    if (NULL == text)
+    {
+        return;
+    }
+
+    while (('\0' != *text) &&
+           (out_index < (dest_size - 1U)) &&
+           (out_index < APP_AI_DISPLAY_TEXT_MAX_LEN))
+    {
+        char ch = *text++;
+
+        if (('"') == ch || ('\r' == ch) || ('\n' == ch) || ('\t' == ch))
+        {
+            ch = ' ';
+        }
+
+        dest[out_index++] = ch;
+    }
+
+    dest[out_index] = '\0';
+}
+
 static void audio_display_text(const char *control, const char *text)
 {
     char cmd[128];
+    char safe_text[APP_AI_DISPLAY_TEXT_MAX_LEN + 1U];
 
     if ((NULL == control) || (NULL == text))
     {
         return;
     }
 
-    snprintf(cmd, sizeof(cmd), "%s.txt=\"%s\"", control, text);
-    uart2_printf(cmd);
-    uart2_putchar(0xFF);
-    uart2_putchar(0xFF);
-    uart2_putchar(0xFF);
-}
-
-static void audio_display_value(const char *control, uint32_t value)
-{
-    char cmd[64];
-
-    if (NULL == control)
-    {
-        return;
-    }
-
-    snprintf(cmd, sizeof(cmd), "%s.txt=\"%lu\"", control, (unsigned long) value);
+    audio_copy_display_text(safe_text, sizeof(safe_text), text);
+    snprintf(cmd, sizeof(cmd), "%s.txt=\"%s\"", control, safe_text);
     uart2_printf(cmd);
     uart2_putchar(0xFF);
     uart2_putchar(0xFF);
@@ -160,9 +248,39 @@ static void audio_display_state(audio_runtime_state_t state)
             break;
         }
 
-        case AUDIO_RUNTIME_ACTIVITY:
+        case AUDIO_RUNTIME_WAKEUP:
         {
-            audio_display_text(DISPLAY_STATUS_CTRL, "VOICE");
+            audio_display_text(DISPLAY_STATUS_CTRL, "WAKE");
+            break;
+        }
+
+        case AUDIO_RUNTIME_RECORDING:
+        {
+            audio_display_text(DISPLAY_STATUS_CTRL, "RECORD");
+            break;
+        }
+
+        case AUDIO_RUNTIME_ASR:
+        {
+            audio_display_text(DISPLAY_STATUS_CTRL, "ASR");
+            break;
+        }
+
+        case AUDIO_RUNTIME_TRANSLATE:
+        {
+            audio_display_text(DISPLAY_STATUS_CTRL, "TRANSLATE");
+            break;
+        }
+
+        case AUDIO_RUNTIME_SHOW_RESULT:
+        {
+            audio_display_text(DISPLAY_STATUS_CTRL, "DONE");
+            break;
+        }
+
+        case AUDIO_RUNTIME_ERROR:
+        {
+            audio_display_text(DISPLAY_STATUS_CTRL, "ERROR");
             break;
         }
 
@@ -172,6 +290,58 @@ static void audio_display_state(audio_runtime_state_t state)
             break;
         }
     }
+}
+
+static void audio_show_translation_lines(void)
+{
+    char src_line[128];
+    char dst_line[128];
+
+    snprintf(src_line, sizeof(src_line), "SRC:%s", g_source_text);
+    snprintf(dst_line, sizeof(dst_line), "DST:%s", g_translated_text);
+
+    audio_display_text(DISPLAY_LEVEL_CTRL, src_line);
+    audio_display_text(DISPLAY_HINT_CTRL, dst_line);
+}
+
+static void audio_state_set(audio_runtime_state_t state)
+{
+    g_audio_state = state;
+    audio_display_state(state);
+}
+
+static void audio_reset_capture_session(void)
+{
+    g_wake_streak = 0;
+    g_record_frame_count = 0;
+    g_record_level_sum = 0;
+}
+
+static fsp_err_t audio_cloud_prepare(void)
+{
+    fsp_err_t err;
+
+    if (g_cloud_connected)
+    {
+        return FSP_SUCCESS;
+    }
+
+    if ((0 == strcmp(APP_AI_WIFI_SSID, "your_ssid")) || (0 == strcmp(APP_AI_WIFI_PASSWORD, "your_password")))
+    {
+        return FSP_ERR_NOT_OPEN;
+    }
+
+    err = net_client_init();
+    if (FSP_SUCCESS == err)
+    {
+        err = net_client_connect_wifi(APP_AI_WIFI_SSID, APP_AI_WIFI_PASSWORD);
+    }
+    if (FSP_SUCCESS == err)
+    {
+        g_cloud_connected = true;
+    }
+
+    return err;
 }
 
 static fsp_err_t audio_frontend_init(void)
@@ -184,6 +354,14 @@ static fsp_err_t audio_frontend_init(void)
     g_audio_rx_events = 0;
     g_audio_error_events = 0;
     g_audio_state = AUDIO_RUNTIME_BOOT;
+    g_cloud_connected = false;
+    g_wake_streak = 0;
+    g_record_frame_count = 0;
+    g_record_level_sum = 0;
+    g_result_hold_count = 0;
+    g_cooldown_count = 0;
+    memset(g_source_text, 0, sizeof(g_source_text));
+    memset(g_translated_text, 0, sizeof(g_translated_text));
 
     err = g_i2s0.p_api->open(g_i2s0.p_ctrl, g_i2s0.p_cfg);
     if (FSP_SUCCESS != err)
@@ -223,39 +401,152 @@ static void audio_process_frame(void)
 {
     static uint32_t display_counter = 0;
     uint32_t level = audio_calculate_level(g_audio_rx_buffer, AUDIO_FRAME_SAMPLES);
+    fsp_err_t err = FSP_SUCCESS;
 
-    if (level > AUDIO_LEVEL_TRIGGER)
+    if (g_cooldown_count > 0U)
     {
-        g_audio_state = AUDIO_RUNTIME_ACTIVITY;
+        g_cooldown_count--;
     }
-    else
+
+    switch (g_audio_state)
     {
-        g_audio_state = AUDIO_RUNTIME_LISTENING;
+        case AUDIO_RUNTIME_BOOT:
+        {
+            audio_state_set(AUDIO_RUNTIME_LISTENING);
+            break;
+        }
+
+        case AUDIO_RUNTIME_LISTENING:
+        {
+            if ((level > AUDIO_WAKE_LEVEL_TRIGGER) && (0U == g_cooldown_count))
+            {
+                g_wake_streak++;
+            }
+            else
+            {
+                g_wake_streak = 0;
+            }
+
+            if (g_wake_streak >= AUDIO_WAKE_CONSECUTIVE_FRAMES)
+            {
+                audio_reset_capture_session();
+                audio_state_set(AUDIO_RUNTIME_WAKEUP);
+                audio_display_text(DISPLAY_LEVEL_CTRL, "SRC:wakeup");
+                audio_display_text(DISPLAY_HINT_CTRL, "DST:recording...");
+            }
+
+            break;
+        }
+
+        case AUDIO_RUNTIME_WAKEUP:
+        {
+            audio_state_set(AUDIO_RUNTIME_RECORDING);
+            break;
+        }
+
+        case AUDIO_RUNTIME_RECORDING:
+        {
+            g_record_frame_count++;
+            g_record_level_sum += level;
+
+            if (g_record_frame_count >= AUDIO_RECORD_TARGET_FRAMES)
+            {
+                uint32_t avg_level = g_record_level_sum / g_record_frame_count;
+                memset(g_source_text, 0, sizeof(g_source_text));
+                memset(g_translated_text, 0, sizeof(g_translated_text));
+
+                audio_state_set(AUDIO_RUNTIME_ASR);
+                err = app_ai_asr_stub(avg_level, g_source_text, sizeof(g_source_text));
+                if (FSP_SUCCESS != err)
+                {
+                    snprintf(g_source_text, sizeof(g_source_text), "asr failed");
+                }
+
+                if (FSP_SUCCESS == err)
+                {
+                    audio_state_set(AUDIO_RUNTIME_TRANSLATE);
+                    err = audio_cloud_prepare();
+
+                    if (FSP_SUCCESS == err)
+                    {
+                        err = app_ai_translate_pipeline(g_source_text,
+                                                        APP_AI_TRANSLATE_FROM_LANG,
+                                                        APP_AI_TRANSLATE_TO_LANG,
+                                                        g_translated_text,
+                                                        sizeof(g_translated_text));
+                    }
+                    else
+                    {
+                        snprintf(g_translated_text, sizeof(g_translated_text), "config wifi first");
+                    }
+                }
+
+                if (FSP_SUCCESS != err)
+                {
+                    if (FSP_ERR_NOT_OPEN == err)
+                    {
+                        snprintf(g_translated_text, sizeof(g_translated_text), "config wifi first");
+                    }
+                    else
+                    {
+                        snprintf(g_translated_text, sizeof(g_translated_text), "translate err:%d", err);
+                    }
+
+                    audio_state_set(AUDIO_RUNTIME_ERROR);
+                }
+                else
+                {
+                    audio_state_set(AUDIO_RUNTIME_SHOW_RESULT);
+                }
+
+                audio_show_translation_lines();
+                g_result_hold_count = AUDIO_RESULT_HOLD_FRAMES;
+                g_cooldown_count = AUDIO_COOLDOWN_FRAMES;
+                audio_reset_capture_session();
+            }
+
+            break;
+        }
+
+        case AUDIO_RUNTIME_ASR:
+        case AUDIO_RUNTIME_TRANSLATE:
+        {
+            break;
+        }
+
+        case AUDIO_RUNTIME_SHOW_RESULT:
+        case AUDIO_RUNTIME_ERROR:
+        {
+            if (g_result_hold_count > 0U)
+            {
+                g_result_hold_count--;
+            }
+            else
+            {
+                audio_state_set(AUDIO_RUNTIME_LISTENING);
+                audio_display_text(DISPLAY_LEVEL_CTRL, "SRC:-");
+                audio_display_text(DISPLAY_HINT_CTRL, "DST:-");
+            }
+
+            break;
+        }
+
+        default:
+        {
+            audio_state_set(AUDIO_RUNTIME_ERROR);
+            break;
+        }
     }
 
     display_counter++;
 
     if ((display_counter % AUDIO_STATUS_UPDATE_INTERVAL) == 0U)
     {
-        audio_display_state(g_audio_state);
-        audio_display_value(DISPLAY_LEVEL_CTRL, level);
-
-        if (g_audio_error_events > 0U)
-        {
-            audio_display_text(DISPLAY_HINT_CTRL, "Check I2S config");
-        }
-        else if (g_audio_state == AUDIO_RUNTIME_ACTIVITY)
-        {
-            audio_display_text(DISPLAY_HINT_CTRL, "Voice activity");
-        }
-        else
-        {
-            audio_display_text(DISPLAY_HINT_CTRL, "Waiting wake word");
-        }
-
-        printf("I2S frames=%lu level=%lu errors=%lu\n",
+        printf("I2S frames=%lu level=%lu wake=%lu state=%d errors=%lu\n",
                (unsigned long) g_audio_rx_events,
                (unsigned long) level,
+               (unsigned long) g_wake_streak,
+               (int) g_audio_state,
                (unsigned long) g_audio_error_events);
     }
 }

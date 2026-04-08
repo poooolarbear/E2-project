@@ -55,5 +55,7 @@ void app_wifi_translate_test(void);
 fsp_err_t app_wifi_connect_api(const char *ssid, const char *password);
 void app_wifi_send_message(wifi_state_t state, const char *message);
 fsp_err_t app_wifi_translate_baidu(const char *text, const char *from_lang, const char *to_lang, char *result, uint16_t result_len);
+fsp_err_t app_ai_asr_stub(uint32_t average_level, char *result, uint16_t result_len);
+fsp_err_t app_ai_translate_pipeline(const char *source_text, const char *from_lang, const char *to_lang, char *result, uint16_t result_len);
 
 #endif /*APP_TEST_H*/
